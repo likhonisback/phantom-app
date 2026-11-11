@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: phantom-app
+    env: node
+    plan: free
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    envVars:
+      - key: PORT
+        value: 3001
+      - key: VITE_APP_URL
+        value: https://likhonsesni.xo.je
+      - key: VITE_BRAND_NAME
+        value: PHANTOM
+      - key: VITE_KEY_PREFIX
+        value: PH
+      - key: JWT_SECRET
+        generateValue: true
