@@ -1,0 +1,9 @@
+node_modules/
+.env.bak*
+*.log
+*.zip
+bluestacks_screen.png
+screen_domain.png
+screen_lan.png
+deploy/
+deploy_cloud/

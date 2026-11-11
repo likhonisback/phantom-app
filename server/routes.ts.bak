@@ -1,0 +1,211 @@
+import { Router, Request, Response, NextFunction } from 'express';
+import { keysDatabase, findOrCreateKey, KeyRecord } from './keys';
+import { createToken, verifyToken } from './auth';
+import { FeaturesState } from '../src/types';
+
+export const apiRouter = Router();
+
+// Middleware to authenticate Bearer token
+function requireAuth(req: Request, res: Response, next: NextFunction) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({ ok: false, error: 'Unauthorized' });
+  }
+
+  const token = authHeader.slice(7).trim();
+  const payload = verifyToken(token);
+
+  if (!payload) {
+    return res.status(401).json({ ok: false, error: 'Invalid or expired session' });
+  }
+
+  const record = keysDatabase.get(payload.key);
+  if (!record) {
+    return res.status(401).json({ ok: false, error: 'Session key not found' });
+  }
+
+  (req as any).userRecord = record;
+  next();
+}
+
+/**
+ * POST /api/unlock
+ * Body: { key: string }
+ */
+apiRouter.post('/unlock', (req: Request, res: Response) => {
+  const { key, device_model, device_os, raw_hwid } = req.body;
+
+  if (!key || typeof key !== 'string') {
+    return res.status(400).json({ ok: false, error: 'Key is required' });
+  }
+
+  const normalized = key.trim().toUpperCase();
+
+  // Validate format PREFIX-XXXX-XXXX-XXXX
+  const prefix = process.env.VITE_KEY_PREFIX || 'PH';
+  const pattern = new RegExp(`^${prefix}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$`);
+
+  if (!pattern.test(normalized)) {
+    return res.status(400).json({ ok: false, error: 'Invalid key format' });
+  }
+
+  const record = findOrCreateKey(normalized);
+
+  // If client provided detected device and record is not bound or new, bind it
+  if (device_model && device_os) {
+    if (!record.bound_hwid) {
+      record.bound_hwid = raw_hwid || `hwid_${Date.now()}`;
+      record.device_model = device_model;
+      record.device_os = device_os;
+    }
+  }
+
+  // Check key expiration
+  if (record.status === 'expired') {
+    return res.status(403).json({
+      ok: false,
+      error: 'expired',
+      message: 'This key has expired. Get a new one from your seller.',
+    });
+  }
+
+  // Issue secure session token
+  const token = createToken(record.key);
+
+  const session = {
+    key: record.key,
+    status: record.status,
+    online: record.online,
+    expires_at: record.expires_at,
+    last_seen_at: record.last_seen_at,
+    lock_until: record.lock_until,
+    bound_hwid: record.bound_hwid,
+    device_os: record.device_os,
+    device_model: record.device_model,
+    reset_after: record.reset_after,
+    subscription_url: `hiddify://install-sub?url=${encodeURIComponent(
+      `https://likhonsesni.xo.je/sub/${record.key}`
+    )}`,
+  };
+
+  return res.json({
+    ok: true,
+    token,
+    session,
+    features: record.features,
+  });
+});
+
+/**
+ * GET /api/me
+ * Retrieves current user session and features
+ */
+apiRouter.get('/me', requireAuth, (req: Request, res: Response) => {
+  const record: KeyRecord = (req as any).userRecord;
+
+  // Update last seen timestamp
+  record.last_seen_at = new Date().toISOString();
+
+  const session = {
+    key: record.key,
+    status: record.status,
+    online: record.online,
+    expires_at: record.expires_at,
+    last_seen_at: record.last_seen_at,
+    lock_until: record.lock_until,
+    bound_hwid: record.bound_hwid,
+    device_os: record.device_os,
+    device_model: record.device_model,
+    reset_after: record.reset_after,
+    subscription_url: `hiddify://install-sub?url=${encodeURIComponent(
+      `https://likhonsesni.xo.je/sub/${record.key}`
+    )}`,
+  };
+
+  return res.json({
+    ok: true,
+    session,
+    features: record.features,
+  });
+});
+
+/**
+ * POST /api/features
+ * Body: { features: FeaturesState }
+ */
+apiRouter.post('/features', requireAuth, (req: Request, res: Response) => {
+  const record: KeyRecord = (req as any).userRecord;
+  const { features } = req.body;
+
+  if (!features || typeof features !== 'object') {
+    return res.status(400).json({ ok: false, error: 'Invalid features payload' });
+  }
+
+  // Merge features safely
+  record.features = {
+    ...record.features,
+    ...features,
+  };
+
+  return res.json({
+    ok: true,
+    features: record.features,
+  });
+});
+
+/**
+ * POST /api/reset-device
+ * Resets bound hardware id for the authenticated key
+ */
+apiRouter.post('/reset-device', requireAuth, (req: Request, res: Response) => {
+  const record: KeyRecord = (req as any).userRecord;
+
+  // Check 7 days cooldown if reset_after is set
+  if (record.reset_after && new Date(record.reset_after).getTime() > Date.now()) {
+    return res.status(429).json({
+      ok: false,
+      error: 'cooldown',
+      message: 'You can only reset your device once every 7 days.',
+      reset_after: record.reset_after,
+    });
+  }
+
+  // Unbind device
+  record.bound_hwid = null;
+  record.device_model = null;
+  record.device_os = null;
+  // Set next reset cooldown to 7 days from now
+  record.reset_after = new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString();
+
+  return res.json({
+    ok: true,
+    message: 'Device reset successfully',
+    reset_after: record.reset_after,
+  });
+});
+
+/**
+ * POST /api/logout
+ */
+apiRouter.post('/logout', (req: Request, res: Response) => {
+  return res.json({ ok: true });
+});
+
+/**
+ * GET /api/brand
+ * Returns public brand info
+ */
+apiRouter.get('/brand', (req: Request, res: Response) => {
+  return res.json({
+    ok: true,
+    name: process.env.VITE_BRAND_NAME || 'PHANTOM',
+    slug: process.env.VITE_BRAND_SLUG || 'phantom',
+    prefix: process.env.VITE_KEY_PREFIX || 'PH',
+    accent: process.env.VITE_ACCENT_COLOR || '#ededed',
+    links: {
+      discord: process.env.VITE_DISCORD_URL || 'https://discord.gg/UsmvXdDfVT',
+      whatsapp: process.env.VITE_WHATSAPP_URL || 'https://wa.me/8801319885254',
+      telegram: '',
+    },
+  });
+});

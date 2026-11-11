@@ -1,0 +1,17 @@
+import { BrandConfig } from '../types';
+
+export const BRAND: BrandConfig = {
+  slug: import.meta.env.VITE_BRAND_SLUG || 'phantom',
+  name: import.meta.env.VITE_BRAND_NAME || 'PHANTOM',
+  prefix: import.meta.env.VITE_KEY_PREFIX || 'PH',
+  logoImg: null,
+  markType: 'mark',
+  links: {
+    telegram: '',
+    discord: import.meta.env.VITE_DISCORD_URL || 'https://discord.gg/UsmvXdDfVT',
+    whatsapp: import.meta.env.VITE_WHATSAPP_URL || 'https://wa.me/8801319885254',
+  },
+};
+
+export const DOMAIN_URL = import.meta.env.VITE_APP_URL || 'https://likhonsesni.xo.je';
+export const MARKER_TYPES = ['Dreamland', 'Dot', 'Box', 'Cross'] as const;

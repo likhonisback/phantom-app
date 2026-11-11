@@ -1,0 +1,106 @@
+import { UserSession, FeaturesState } from '../types';
+
+const TOKEN_KEY = 'ph_auth_token';
+
+export const authStorage = {
+  getToken: (): string | null => {
+    try {
+      return localStorage.getItem(TOKEN_KEY);
+    } catch {
+      return null;
+    }
+  },
+  setToken: (token: string) => {
+    try {
+      localStorage.setItem(TOKEN_KEY, token);
+    } catch {}
+  },
+  clearToken: () => {
+    try {
+      localStorage.removeItem(TOKEN_KEY);
+    } catch {}
+  },
+};
+
+export async function apiUnlock(
+  key: string,
+  deviceMeta?: { device_model: string; device_os: string; raw_hwid: string }
+): Promise<{
+  ok: boolean;
+  token?: string;
+  session?: UserSession;
+  features?: FeaturesState;
+  error?: string;
+}> {
+  const res = await fetch('/api/unlock', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      key,
+      device_model: deviceMeta?.device_model,
+      device_os: deviceMeta?.device_os,
+      raw_hwid: deviceMeta?.raw_hwid,
+    }),
+  });
+  return res.json();
+}
+
+export async function apiGetMe(): Promise<{
+  ok: boolean;
+  session?: UserSession;
+  features?: FeaturesState;
+  error?: string;
+}> {
+  const token = authStorage.getToken();
+  if (!token) return { ok: false, error: 'No token' };
+
+  const res = await fetch('/api/me', {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+  return res.json();
+}
+
+export async function apiUpdateFeatures(features: FeaturesState): Promise<{
+  ok: boolean;
+  features?: FeaturesState;
+  error?: string;
+}> {
+  const token = authStorage.getToken();
+  if (!token) return { ok: false, error: 'No token' };
+
+  const res = await fetch('/api/features', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ features }),
+  });
+  return res.json();
+}
+
+export async function apiResetDevice(): Promise<{
+  ok: boolean;
+  reset_after?: string;
+  error?: string;
+}> {
+  const token = authStorage.getToken();
+  if (!token) return { ok: false, error: 'No token' };
+
+  const res = await fetch('/api/reset-device', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+  return res.json();
+}
+
+export async function apiLogout(): Promise<void> {
+  try {
+    await fetch('/api/logout', { method: 'POST' });
+  } catch {}
+  authStorage.clearToken();
+}
